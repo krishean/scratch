@@ -1,0 +1,268 @@
+name: Build
+
+on:
+  push:
+    branches: ["devel"]
+  pull_request:
+    branches: ["devel"]
+
+jobs:
+  build-crosscompile:
+    name: ${{matrix.name}}
+    runs-on: ubuntu-latest
+    env:
+      CC: "gcc"
+      CXX: "g++"
+      AR: "ar"
+      STRIP: "strip"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: "Crosscompile x64 Release", env: "x86-64", DEBUG: 0, CROSS: "x86_64-w64-mingw32" }
+          - { name: "Crosscompile x64 Debug",   env: "x86-64", DEBUG: 1, CROSS: "x86_64-w64-mingw32" }
+          - { name: "Crosscompile x86 Release", env: "i686",   DEBUG: 0, CROSS: "i686-w64-mingw32"   }
+          - { name: "Crosscompile x86 Debug",   env: "i686",   DEBUG: 1, CROSS: "i686-w64-mingw32"   }
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+    - name: Install dependencies for Linux
+      run: |
+        sudo apt update
+        sudo apt install -y jq gcc-mingw-w64-${{matrix.env}} g++-mingw-w64-${{matrix.env}}
+    - name: Install SDL2 devel libraries
+      run: |
+        sdl2_latest=$(curl -fsSL "https://api.github.com/repos/libsdl-org/SDL/releases/latest")
+        sdl2_ver=$(echo "$sdl2_latest" | jq -r '.name')
+        echo "SDL2_DIR=SDL2-$sdl2_ver" >> $GITHUB_ENV
+        sdl2_url=$(echo "$sdl2_latest" | jq -r '.assets[] | .browser_download_url | select(endswith("mingw.tar.gz"))')
+        sdl2_file=$(basename "$sdl2_url")
+        curl -fsSL -o "$sdl2_file" "$sdl2_url"
+        tar -xzf "$sdl2_file"
+    - name: Release build
+      if: ${{ matrix.DEBUG == 0 }}
+      run: |
+        PATH="$GITHUB_WORKSPACE/$SDL2_DIR/${{matrix.CROSS}}/bin:$PATH" \
+          MSYSTEM_PREFIX="$GITHUB_WORKSPACE/$SDL2_DIR/${{matrix.CROSS}}" \
+          DEBUG=${{matrix.DEBUG}} CROSS=${{matrix.CROSS}} UNAME_O=Msys \
+          make -j$(nproc) strip
+        if [ "$?" -eq "0" ] && [ -d "bin" ];then
+          ls -lA bin
+          if [ -f "bin/scratch.exe" ];then
+            file bin/scratch.exe
+            ${{matrix.CROSS}}-objdump -p bin/scratch.exe | grep -i dll
+          fi
+        fi
+    - name: Debug build
+      if: ${{ matrix.DEBUG == 1 }}
+      run: |
+        PATH="$GITHUB_WORKSPACE/$SDL2_DIR/${{matrix.CROSS}}/bin:$PATH" \
+          MSYSTEM_PREFIX="$GITHUB_WORKSPACE/$SDL2_DIR/${{matrix.CROSS}}" \
+          DEBUG=${{matrix.DEBUG}} CROSS=${{matrix.CROSS}} UNAME_O=Msys \
+          make -j$(nproc)
+        if [ "$?" -eq "0" ] && [ -d "bin" ];then
+          ls -lA bin
+          if [ -f "bin/scratch.exe" ];then
+            file bin/scratch.exe
+            ${{matrix.CROSS}}-objdump -p bin/scratch.exe | grep -i dll
+          fi
+        fi
+
+  build-linux:
+    name: ${{matrix.name}}
+    runs-on: ubuntu-latest
+    env:
+      CC: ${{matrix.CC}}
+      CXX: ${{matrix.CXX}}
+      AR: ${{matrix.AR}}
+      STRIP: ${{matrix.STRIP}}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: "Linux GCC Release",  DEBUG: 0, CLANG: 0, CC: "gcc",      CXX: "g++",        AR: "ar",         STRIP: "strip"         }
+          - { name: "Linux GCC Debug",    DEBUG: 1, CLANG: 0, CC: "gcc",      CXX: "g++",        AR: "ar",         STRIP: "strip"         }
+          - { name: "Linux LLVM Release", DEBUG: 0, CLANG: 1, CC: "clang-14", CXX: "clang++-14", AR: "llvm-ar-14", STRIP: "llvm-strip-14" }
+          - { name: "Linux LLVM Debug",   DEBUG: 1, CLANG: 1, CC: "clang-14", CXX: "clang++-14", AR: "llvm-ar-14", STRIP: "llvm-strip-14" }
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+    - name: Install dependencies for Linux
+      run: |
+        sudo apt update
+        sudo apt install -y libsdl2-dev
+    - name: Release build
+      if: ${{ matrix.DEBUG == 0 }}
+      run: |
+        DEBUG=${{matrix.DEBUG}} CLANG=${{matrix.CLANG}} make -j$(nproc) strip
+        if [ "$?" -eq "0" ] && [ -d "bin" ];then
+          ls -lA bin
+          if [ -f "bin/scratch" ];then
+            file bin/scratch
+            objdump -p bin/scratch | grep NEEDED
+          fi
+        fi
+    - name: Debug build
+      if: ${{ matrix.DEBUG == 1 }}
+      run: |
+        DEBUG=${{matrix.DEBUG}} CLANG=${{matrix.CLANG}} make -j$(nproc)
+        if [ "$?" -eq "0" ] && [ -d "bin" ];then
+          ls -lA bin
+          if [ -f "bin/scratch" ];then
+            file bin/scratch
+            objdump -p bin/scratch 2>/dev/null | grep NEEDED
+          fi
+        fi
+
+  build-macos:
+    name: ${{matrix.name}}
+    runs-on: macos-latest
+    env:
+      CC: ${{matrix.CC}}
+      CXX: ${{matrix.CXX}}
+      AR: ${{matrix.AR}}
+      STRIP: ${{matrix.STRIP}}
+      CFLAGS: ${{matrix.CFLAGS}}
+      CPPFLAGS: ${{matrix.CPPFLAGS}}
+      LDLIBS: ${{matrix.LDLIBS}}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: "macOS GCC Release", DEBUG: 0, CLANG: 0, CC: "gcc", CXX: "g++", AR: "ar", STRIP: "strip" }
+          - { name: "macOS GCC Debug",   DEBUG: 1, CLANG: 0, CC: "gcc", CXX: "g++", AR: "ar", STRIP: "strip" }
+          - name: "macOS LLVM Release"
+            DEBUG: 0
+            CLANG: 1
+            CC: "/usr/local/opt/llvm@15/bin/clang"
+            CXX: "/usr/local/opt/llvm@15/bin/clang++"
+            AR: "/usr/local/opt/llvm@15/bin/llvm-ar"
+            STRIP: "/usr/local/opt/llvm@15/bin/llvm-strip"
+            CFLAGS: "-I/usr/local/opt/llvm@15/include"
+            CPPFLAGS: "-I/usr/local/opt/llvm@15/include"
+            LDLIBS: "-L/usr/local/opt/llvm@15/lib"
+          - name: "macOS LLVM Debug"
+            DEBUG: 1
+            CLANG: 1
+            CC: "/usr/local/opt/llvm@15/bin/clang"
+            CXX: "/usr/local/opt/llvm@15/bin/clang++"
+            AR: "/usr/local/opt/llvm@15/bin/llvm-ar"
+            STRIP: "/usr/local/opt/llvm@15/bin/llvm-strip"
+            CFLAGS: "-I/usr/local/opt/llvm@15/include"
+            CPPFLAGS: "-I/usr/local/opt/llvm@15/include"
+            LDLIBS: "-L/usr/local/opt/llvm@15/lib"
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+    - name: Install dependencies for macOS
+      run: |
+        brew install sdl2 coreutils
+    - name: Release build
+      if: ${{ matrix.DEBUG == 0 }}
+      run: |
+        DEBUG=${{matrix.DEBUG}} CLANG=${{matrix.CLANG}} make -j$(nproc) strip
+        if [ "$?" -eq "0" ] && [ -d "bin" ];then
+          ls -lA bin
+          if [ -f "bin/scratch" ];then
+            file bin/scratch
+          fi
+        fi
+    - name: Debug build
+      if: ${{ matrix.DEBUG == 1 }}
+      run: |
+        DEBUG=${{matrix.DEBUG}} CLANG=${{matrix.CLANG}} make -j$(nproc)
+        if [ "$?" -eq "0" ] && [ -d "bin" ];then
+          ls -lA bin
+          if [ -f "bin/scratch" ];then
+            file bin/scratch
+          fi
+        fi
+
+  build-msvc:
+    name: ${{matrix.name}}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: "MSVC x64 Release", arch: amd64,     Platform: "x64",   Configuration: "Release" }
+          - { name: "MSVC x64 Debug",   arch: amd64,     Platform: "x64",   Configuration: "Debug"   }
+          - { name: "MSVC x86 Release", arch: amd64_x86, Platform: "Win32", Configuration: "Release" }
+          - { name: "MSVC x86 Debug",   arch: amd64_x86, Platform: "Win32", Configuration: "Debug"   }
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+    - uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: ${{matrix.arch}}
+        vsversion: '2022'
+    - name: Build
+      shell: cmd
+      run: |
+        msbuild /m /t:Clean,Build /p:Configuration=${{matrix.Configuration}} /p:Platform=${{matrix.Platform}} scratch.sln
+        if %errorlevel% EQU 0 (
+          if exist "${{matrix.Platform}}\${{matrix.Configuration}}" (
+            dir /a "${{matrix.Platform}}\${{matrix.Configuration}}"
+          )
+        )
+
+  build-msys2:
+    name: ${{matrix.name}}
+    runs-on: windows-latest
+    env:
+      CC: ${{matrix.CC}}
+      CXX: ${{matrix.CXX}}
+      AR: ${{matrix.AR}}
+      STRIP: ${{matrix.STRIP}}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: "MSYS2 GCC x64 Release",  sys: "mingw64", env: "x86_64",       DEBUG: 0, CLANG: 0, CC: "gcc",   CXX: "g++",     AR: "ar",      STRIP: "strip"      }
+          - { name: "MSYS2 GCC x64 Debug",    sys: "mingw64", env: "x86_64",       DEBUG: 1, CLANG: 0, CC: "gcc",   CXX: "g++",     AR: "ar",      STRIP: "strip"      }
+          - { name: "MSYS2 GCC x86 Release",  sys: "mingw32", env: "i686",         DEBUG: 0, CLANG: 0, CC: "gcc",   CXX: "g++",     AR: "ar",      STRIP: "strip"      }
+          - { name: "MSYS2 GCC x86 Debug",    sys: "mingw32", env: "i686",         DEBUG: 1, CLANG: 0, CC: "gcc",   CXX: "g++",     AR: "ar",      STRIP: "strip"      }
+          - { name: "MSYS2 LLVM x64 Release", sys: "clang64", env: "clang-x86_64", DEBUG: 0, CLANG: 1, CC: "clang", CXX: "clang++", AR: "llvm-ar", STRIP: "llvm-strip" }
+          - { name: "MSYS2 LLVM x64 Debug",   sys: "clang64", env: "clang-x86_64", DEBUG: 1, CLANG: 1, CC: "clang", CXX: "clang++", AR: "llvm-ar", STRIP: "llvm-strip" }
+          - { name: "MSYS2 LLVM x86 Release", sys: "clang32", env: "clang-i686",   DEBUG: 0, CLANG: 1, CC: "clang", CXX: "clang++", AR: "llvm-ar", STRIP: "llvm-strip" }
+          - { name: "MSYS2 LLVM x86 Debug",   sys: "clang32", env: "clang-i686",   DEBUG: 1, CLANG: 1, CC: "clang", CXX: "clang++", AR: "llvm-ar", STRIP: "llvm-strip" }
+    steps:
+    - uses: msys2/setup-msys2@v2
+      with:
+        msystem: ${{matrix.sys}}
+        update: true
+        install: >-
+          make
+          mingw-w64-${{matrix.env}}-${{matrix.CC}}
+          mingw-w64-${{matrix.env}}-SDL2
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+    - name: Release build
+      if: ${{ matrix.DEBUG == 0 }}
+      shell: msys2 {0}
+      run: |
+        DEBUG=${{matrix.DEBUG}} CLANG=${{matrix.CLANG}} make -j$(nproc) strip
+        if [ "$?" -eq "0" ] && [ -d "bin" ];then
+          ls -lA bin
+          if [ -f "bin/scratch.exe" ];then
+            file bin/scratch.exe
+            objdump -p bin/scratch.exe | grep -i dll
+          fi
+        fi
+    - name: Debug build
+      if: ${{ matrix.DEBUG == 1 }}
+      shell: msys2 {0}
+      run: |
+        DEBUG=${{matrix.DEBUG}} CLANG=${{matrix.CLANG}} make -j$(nproc)
+        if [ "$?" -eq "0" ] && [ -d "bin" ];then
+          ls -lA bin
+          if [ -f "bin/scratch.exe" ];then
+            file bin/scratch.exe
+            objdump -p bin/scratch.exe | grep -i dll
+          fi
+        fi
