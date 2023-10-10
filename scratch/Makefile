@@ -46,22 +46,24 @@ VPATH:=$(SRC_DIR):$(BASE_DIR)/stb
 CFLAGS:=$(CFLAGS) $(INCLUDES)
 CPPFLAGS:=$(CPPFLAGS) $(INCLUDES) -std=c++11
 ifeq ($(DEBUG), 1)
-    CFLAGS:=$(CFLAGS) -g -O0 -DDEBUG -Wall
-    CPPFLAGS:=$(CPPFLAGS) -g -O0 -DDEBUG -Wall
+    CFLAGS:=$(CFLAGS) -g -O0 -DDEBUG -Wall -Wformat
+    CPPFLAGS:=$(CPPFLAGS) -g -O0 -DDEBUG -Wall -Wformat
 else
-    CFLAGS:=$(CFLAGS) -O2 -DNDEBUG -Wall
-    CPPFLAGS:=$(CPPFLAGS) -O2 -DNDEBUG -Wall
+    CFLAGS:=$(CFLAGS) -O2 -DNDEBUG -Wall -Wformat
+    CPPFLAGS:=$(CPPFLAGS) -O2 -DNDEBUG -Wall -Wformat
 endif
 
 ifeq ($(UNAME_O), Msys)
     OUT:=$(OUT).exe
-    LDLIBS:=$(LDLIBS) -mwindows -lopengl32 -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic
+    LDLIBS:=$(LDLIBS) -mwindows -lgdi32 -lopengl32 -limm32 -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic
     COPY_FILES:=$(MSYSTEM_PREFIX)/bin/SDL2.dll
 else ifeq ($(UNAME_S), Darwin)
-    LDLIBS:=$(LDLIBS) -framework OpenGL
+    LDLIBS:=$(LDLIBS) -framework OpenGL -framework Cocoa -framework IOKit -framework CoreVideo -L/usr/local/lib -L/opt/local/lib
+    CPPFLAGS:=$(CPPFLAGS) -I/usr/local/include -I/opt/local/include
+    CFLAGS:=$(CFLAGS) -I/usr/local/include -I/opt/local/include
     COPY_FILES:=
 else
-    LDLIBS:=$(LDLIBS) -ldl -lGL
+    LDLIBS:=$(LDLIBS) -lGL -ldl
     COPY_FILES:=
 endif
 LDLIBS:=$(LDLIBS) $(shell sdl2-config --libs) $(BIN_DIR)/scratch_imgui.a $(BIN_DIR)/scratch_box2d.a
